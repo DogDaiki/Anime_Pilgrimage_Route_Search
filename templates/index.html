@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>聖地巡礼 徒歩ルート最適化アプリ</title>
+
+    <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.png') }}">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        
+        #map { width: 100vw; height: 100vh; z-index: 1; }
+
+        /* --- 共通タブコンテナ --- */
+        .tab-panel-container {
+            position: absolute;
+            top: 20px;
+            z-index: 1001;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 22px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            backdrop-filter: blur(5px);
+            overflow: hidden;
+            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1), height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            width: 44px;
+            height: 44px;
+            max-height: 44px;
+        }
+
+        /* --- メイン検索パネル --- */
+        #search-panel {
+            left: 20px;
+        }
+        #search-panel.open {
+            width: 340px;
+            height: auto;
+            max-height: calc(100vh - 40px);
+            padding: 12px 15px;
+            border-radius: 8px;
+            overflow-y: auto;
+        }
+
+        /* --- お気に入りコンテナ --- */
+        #outer-fav-container {
+            border: 1px solid #ffca28;
+        }
+        #outer-fav-container.open {
+            width: 260px;
+            height: auto;
+            max-height: 380px;
+            border-radius: 8px;
+        }
+
+        /* --- アニメ検索コンテナ --- */
+        #outer-anime-container { 
+            border: 1px solid #007bff; 
+            display: flex;
+            flex-direction: row;
+        }
+        #outer-anime-container.open {
+            width: 260px;
+            height: auto;
+            max-height: 380px;
+            border-radius: 8px;
+        }
+        #outer-anime-container.open.sub-open {
+            width: 520px;
+        }
+
+        /* --- 検索ヘッダーパーツ --- */
+        .search-header-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+            height: 44px;
+            min-height: 44px;
+            padding: 0 12px;
+            width: 100%;
+        }
+        .search-container.open .search-header-bar {
+            height: auto;
+            min-height: 0;
+            padding: 0 0 4px 0;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #eee;
+        }
+        .search-header-title {
+            font-size: 13px;
+            font-weight: bold;
+            color: #333;
+            display: none;
+            white-space: nowrap;
+        }
+        .search-header-icon { 
+            font-size: 18px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+        }
+        .search-container.open .search-header-title { display: inline; }
+        .search-container.open .search-header-icon { display: none; }
+
+        .search-toggle-btn {
+            background: transparent;
+            border: none;
+            font-size: 10px;
+            color: #666;
+            cursor: pointer;
+            display: none;
+        }
+        .search-container.open .search-toggle-btn { display: block; }
+        .search-content-body { display: none; }
+        .search-container.open .search-content-body { display: block; }
+
+        /* --- タブ内レイアウト --- */
+        .tab-panel-main {
+            width: 260px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .tab-panel-sub {
+            width: 260px;
+            flex-shrink: 0;
+            border-left: 1px solid #b3d7ff;
+            background: #f8faff;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .tab-header-btn {
+            width: 100%;
+            height: 44px;
+            background: transparent;
+            border: none;
+            padding: 0;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            outline: none;
+            flex-shrink: 0;
+        }
+        .tab-panel-container.open .tab-header-btn {
+            height: 40px;
+            padding: 0 12px;
+            justify-content: space-between;
+        }
+
+        .tab-btn-text, .tab-btn-arrow { display: none; }
+        
+        .tab-btn-icon { 
+            font-size: 18px; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute; 
+            left: 10px; 
+            top: 10px;
+            line-height: 1;
+            font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+        }
+        
+        .tab-panel-container.open .tab-btn-text { display: inline; }
+        .tab-panel-container.open .tab-btn-arrow { display: inline; }
+        .tab-panel-container.open .tab-btn-icon { display: none; }
+
+        .fav-header-btn { color: #d97706; }
+        .fav-header-btn:hover { background-color: #fff8e1; }
+        .anime-header-btn { color: #007bff; }
+        .anime-header-btn:hover { background-color: #e8f0fe; }
+
+        .sub-header-bar {
+            height: 40px;
+            padding: 0 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #e8f0fe;
+            border-bottom: 1px solid #b3d7ff;
+            font-size: 11px;
+            font-weight: bold;
+            color: #007bff;
+            flex-shrink: 0;
+        }
+        .sub-header-title {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
+        .sub-close-btn {
+            background: transparent;
+            border: none;
+            font-size: 14px;
+            font-weight: bold;
+            color: #007bff;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+        .sub-close-btn:hover { color: #0056b3; }
+
+        .tab-content {
+            padding: 0 10px 10px 10px;
+            display: none;
+            flex: 1;
+            overflow: hidden;
+        }
+        .tab-panel-container.open .tab-content {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .tab-list {
+            list-style: none;
+            max-height: 310px;
+            overflow-y: auto;
+            border-top: 1px solid #eee;
+            padding-top: 8px;
+            width: 100%;
+        }
+
+        .fav-item, .anime-item {
+            display: flex;
+            flex-direction: column;
+            padding: 8px;
+            background: white;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .fav-item { border: 1px solid #ffe082; flex-direction: row; justify-content: space-between; align-items: center; }
+        .anime-item { border: 1px solid #b3d7ff; }
+        .anime-item:hover { background-color: #e8f0fe; }
+        .anime-item.active { border: 2px solid #007bff; background-color: #e8f0fe; }
+
+        .anime-item-img {
+            width: 100%;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 4px;
+            margin-top: 6px;
+            background-color: #eee;
+        }
+
+        .item-info {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 0;
+        }
+        .item-sub {
+            font-size: 10px;
+            color: #888;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.1;
+        }
+        .item-main {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #007bff;
+            font-weight: bold;
+        }
+
+        /* --- フォーム・パーツ --- */
+        .input-group { margin-bottom: 12px; position: relative; }
+        .input-group label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 4px; color: #333; }
+        .spot-work-title {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: none;
+        }
+        .input-wrapper { position: relative; display: flex; align-items: center; }
+        .search-input {
+            width: 100%;
+            padding: 10px;
+            padding-right: 55px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            outline: none;
+        }
+        .search-input:focus { border-color: #007bff; box-shadow: 0 0 5px rgba(0,123,255,0.3); }
+        .search-input[readonly] { background-color: #e9ecef; color: #495057; border-color: #ced4da; cursor: not-allowed; }
+
+        .star-btn {
+            position: absolute;
+            right: 30px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: transparent;
+            border: none;
+            font-size: 16px;
+            color: #ccc;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+        }
+        .star-btn.active { color: #ffca28; }
+
+        .delete-btn {
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: transparent;
+            border: none;
+            font-size: 16px;
+            font-weight: bold;
+            color: #888;
+            cursor: pointer;
+            width: 24px;
+            height: 24px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+        .delete-btn:hover { background-color: #ddd; color: #333; }
+        .status-msg { font-size: 11px; color: #28a745; margin-top: 2px; }
+
+        .suggestions-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #007bff;
+            border-radius: 0 0 4px 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            list-style: none;
+            z-index: 1002;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+        }
+        .suggestions-list li {
+            padding: 8px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            flex-direction: column;
+        }
+        .suggestions-list li:hover { background-color: #007bff; color: white; }
+        .sugg-work { font-size: 10px; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .suggestions-list li:hover .sugg-work { color: #e0e0e0; }
+        .sugg-name { font-size: 13px; font-weight: bold; }
+
+        .result-box { margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px; display: none; }
+        .recommend-section { margin-top: 15px; border-top: 1px dashed #ccc; padding-top: 10px; display: none; }
+        .recommend-section h4 { font-size: 12px; color: #555; margin-bottom: 8px; }
+        .recommend-list { display: flex; flex-direction: row; gap: 6px; justify-content: space-between; }
+        .recommend-card {
+            flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center;
+            background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 6px;
+            cursor: pointer; transition: background-color 0.2s, transform 0.1s; text-align: center;
+        }
+        .recommend-card:hover { background-color: #e2e6ea; transform: translateY(-2px); }
+        .recommend-img { width: 100%; height: 60px; object-fit: cover; border-radius: 4px; margin-bottom: 4px; background-color: #ddd; }
+        .recommend-info { display: flex; flex-direction: column; width: 100%; overflow: hidden; }
+        .recommend-title { font-size: 10px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; line-height: 1.2; }
+        .recommend-name { font-size: 11px; font-weight: bold; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; margin-top: 1px; }
+        .recommend-dist { font-size: 10px; color: #007bff; margin-top: 2px; }
+
+        .red-marker-icon { filter: hue-rotate(140deg) saturate(2.5) brightness(0.9); }
+
+        #send-btn {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            color: white;
+            background-color: #007bff;
+            border: none;
+            border-radius: 25px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            cursor: pointer;
+            display: none;
+        }
+        #send-btn:hover { background-color: #0056b3; }
+
+        .color-badge { display: inline-block; width: 12px; height: 12px; margin-right: 6px; border-radius: 2px; }
+        .leg-item { font-size: 12px; margin-bottom: 4px; display: flex; align-items: center; }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <!-- メイン検索パネル -->
+    <div class="tab-panel-container search-container" id="search-panel">
+        <div class="search-header-bar" id="search-header-toggle">
+            <span class="search-header-icon" title="検索">🔍</span>
+            <span class="search-header-title">🔍 聖地巡礼ルート検索</span>
+            <button type="button" class="search-toggle-btn" id="search-toggle-arrow">▲</button>
+        </div>
+
+        <div class="search-content-body">
+            <div class="input-group" id="start-group">
+                <label>1. 現在地の住所 (Enterで決定)</label>
+                <div class="input-wrapper">
+                    <input type="text" id="start-address" class="search-input" style="padding-right: 30px;" placeholder="例: 東京都千代田区">
+                    <button type="button" class="delete-btn" id="start-delete-btn">×</button>
+                </div>
+                <div id="start-status" class="status-msg"></div>
+            </div>
+
+            <div id="spot-inputs-container"></div>
+
+            <div id="result-box" class="result-box">
+                <label style="font-weight: bold; font-size: 12px;">おすすめの訪問順序：</label>
+                <ul id="result-list" style="list-style: none; margin-top: 5px;"></ul>
+            </div>
+
+            <div class="recommend-section" id="recommend-section">
+                <h4>💡 現在地周辺のおすすめ聖地</h4>
+                <div class="recommend-list" id="recommend-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- お気に入りコンテナ -->
+    <div class="tab-panel-container" id="outer-fav-container">
+        <div class="tab-panel-main">
+            <button type="button" class="tab-header-btn fav-header-btn" id="fav-header-btn">
+                <span class="tab-btn-icon" title="お気に入り">★</span>
+                <span class="tab-btn-text">★ お気に入り</span>
+                <span class="tab-btn-arrow" id="fav-arrow" style="font-size: 10px; transition: transform 0.3s;">▼</span>
+            </button>
+            <div class="tab-content">
+                <ul class="tab-list" id="fav-list"></ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- アニメ検索コンテナ -->
+    <div class="tab-panel-container" id="outer-anime-container">
+        <div class="tab-panel-main">
+            <button type="button" class="tab-header-btn anime-header-btn" id="anime-header-btn">
+                <span class="tab-btn-icon" title="アニメ一覧">🎬</span>
+                <span class="tab-btn-text">🎬 アニメ一覧</span>
+                <span class="tab-btn-arrow" id="anime-arrow" style="font-size: 10px; transition: transform 0.3s;">▼</span>
+            </button>
+            <div class="tab-content">
+                <ul class="tab-list" id="anime-work-list"></ul>
+            </div>
+        </div>
+
+        <div class="tab-panel-sub" id="anime-sub-panel" style="display: none;">
+            <div class="sub-header-bar">
+                <span class="sub-header-title" id="anime-selected-title">聖地一覧</span>
+                <button type="button" class="sub-close-btn" id="anime-sub-close-btn" title="閉じる">×</button>
+            </div>
+            <div class="tab-content" style="display: flex;">
+                <ul class="tab-list" id="anime-spot-list" style="border-top: none; padding-top: 0;"></ul>
+            </div>
+        </div>
+    </div>
+
+    <button id="send-btn">最適なルートを計算</button>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const ROUTE_COLORS = ['#e6194B', '#3cb44b', '#e6a100', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6'];
+
+        const map = L.map('map', { zoomControl: false }).setView([34.88544447499606, 135.79967532892945], 13);
+        L.control.zoom({ position: 'topright' }).addTo(map);
+
+        // Flaskテンプレート経由で設定を取得
+        const mapboxUsername = "{{ mapbox.username }}"; 
+        const mapboxStyleId = "{{ mapbox.style_id }}";       
+        const mapboxAccessToken = "{{ mapbox.access_token }}"; 
+
+        const mapboxTileUrl = `https://api.mapbox.com/styles/v1/${mapboxUsername}/${mapboxStyleId}/tiles/512/{z}/{x}/{y}@2x?access_token=${mapboxAccessToken}`;
+
+        L.tileLayer(mapboxTileUrl, {
+            tileSize: 512, zoomOffset: -1, maxZoom: 19,
+            attribution: '&copy; OpenStreetMap &copy; Mapbox'
+        }).addTo(map);
+
+        const redIcon = L.icon({
+            iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+            iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+            shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41],
+            className: 'red-marker-icon'
+        });
+
+        let selectedPoints = [];
+        let markers = [];
+        let animeSpotMarkers = [];
+        let routeLayers = [];
+        let spotCount = 0;
+        let activeSpotInputHandler = null;
+
+        let favorites = JSON.parse(localStorage.getItem('spot_favorites') || '[]');
+
+        function saveFavorites() {
+            localStorage.setItem('spot_favorites', JSON.stringify(favorites));
+            renderFavList();
+            updateAllStarBtns();
+        }
+
+        function isFavorite(spotName) {
+            return favorites.some(f => f.name === spotName);
+        }
+
+        function toggleFavorite(spot) {
+            if (isFavorite(spot.name)) {
+                favorites = favorites.filter(f => f.name !== spot.name);
+            } else {
+                favorites.push({ 
+                    name: spot.name, 
+                    work_title: getSpotWorkTitle(spot),
+                    lat: spot.lat, 
+                    lng: spot.lng 
+                });
+            }
+            saveFavorites();
+        }
+
+        function getSpotWorkTitle(spot) {
+            if (!spot) return '';
+            if (spot.work_title) return spot.work_title;
+            if (spot.works && spot.works.length > 0) return spot.works.join(', ');
+            if (spot.sub_names && spot.sub_names.length > 0) return spot.sub_names.join(', ');
+            return '';
+        }
+
+        const startInput = document.getElementById('start-address');
+        const startDeleteBtn = document.getElementById('start-delete-btn');
+        const searchPanel = document.getElementById('search-panel');
+        const searchHeaderToggle = document.getElementById('search-header-toggle');
+        const searchToggleArrow = document.getElementById('search-toggle-arrow');
+        const recommendSection = document.getElementById('recommend-section');
+        const recommendList = document.getElementById('recommend-list');
+
+        const outerFavContainer = document.getElementById('outer-fav-container');
+        const favHeaderBtn = document.getElementById('fav-header-btn');
+        const favArrow = document.getElementById('fav-arrow');
+        const favList = document.getElementById('fav-list');
+
+        const outerAnimeContainer = document.getElementById('outer-anime-container');
+        const animeHeaderBtn = document.getElementById('anime-header-btn');
+        const animeArrow = document.getElementById('anime-arrow');
+        const animeWorkList = document.getElementById('anime-work-list');
+        const animeSpotList = document.getElementById('anime-spot-list');
+        const animeSubPanel = document.getElementById('anime-sub-panel');
+        const animeSubCloseBtn = document.getElementById('anime-sub-close-btn');
+        const animeSelectedTitle = document.getElementById('anime-selected-title');
+
+        function updateTabPositions() {
+            const margin = 10;
+            let currentLeft = 20;
+
+            let searchWidth = 44;
+            if (searchPanel.classList.contains('open')) {
+                searchWidth = 340;
+            }
+            searchPanel.style.left = `${currentLeft}px`;
+            currentLeft += searchWidth + margin;
+
+            let favWidth = 44;
+            if (outerFavContainer.classList.contains('open')) {
+                favWidth = 260;
+            }
+            outerFavContainer.style.left = `${currentLeft}px`;
+            currentLeft += favWidth + margin;
+
+            outerAnimeContainer.style.left = `${currentLeft}px`;
+        }
+
+        updateTabPositions();
+
+        searchHeaderToggle.addEventListener('click', () => {
+            const isOpen = searchPanel.classList.toggle('open');
+            searchToggleArrow.textContent = isOpen ? '▲' : '▼';
+            updateTabPositions();
+        });
+
+        favHeaderBtn.addEventListener('click', () => {
+            const isOpen = outerFavContainer.classList.toggle('open');
+            favArrow.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+            updateTabPositions();
+        });
+
+        animeHeaderBtn.addEventListener('click', () => {
+            const isOpen = outerAnimeContainer.classList.toggle('open');
+            animeArrow.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+            
+            if (isOpen) {
+                loadAnimeWorks();
+            } else {
+                closeAnimeSubPanel();
+            }
+            updateTabPositions();
+        });
+
+        animeSubCloseBtn.addEventListener('click', () => {
+            closeAnimeSubPanel();
+            updateTabPositions();
+        });
+
+        function closeAnimeSubPanel() {
+            animeSubPanel.style.display = 'none';
+            outerAnimeContainer.classList.remove('sub-open');
+            document.querySelectorAll('.anime-item').forEach(el => el.classList.remove('active'));
+            clearAnimeSpotMarkers();
+            updateTabPositions();
+        }
+
+        function clearAnimeSpotMarkers() {
+            animeSpotMarkers.forEach(m => map.removeLayer(m));
+            animeSpotMarkers = [];
+        }
+
+        function loadAnimeWorks() {
+            fetch('/api/works')
+                .then(res => res.json())
+                .then(works => {
+                    animeWorkList.replaceChildren();
+                    if (works.length === 0) {
+                        const emptyLi = document.createElement('li');
+                        emptyLi.style.cssText = 'font-size: 11px; color: #888; text-align: center; padding: 5px;';
+                        emptyLi.textContent = '作品データがありません';
+                        animeWorkList.appendChild(emptyLi);
+                        return;
+                    }
+
+                    works.forEach(work => {
+                        const li = document.createElement('li');
+                        li.className = 'anime-item';
+                        
+                        const titleSpan = document.createElement('span');
+                        titleSpan.className = 'item-main';
+                        titleSpan.style.color = '#333';
+                        titleSpan.title = work.title;
+                        titleSpan.textContent = work.title;
+                        li.appendChild(titleSpan);
+
+                        if (work.image_url) {
+                            const img = document.createElement('img');
+                            img.src = work.image_url;
+                            img.alt = work.title;
+                            img.className = 'anime-item-img';
+                            li.appendChild(img);
+                        } else {
+                            const noImg = document.createElement('div');
+                            noImg.className = 'anime-item-img';
+                            noImg.style.cssText = 'display:flex;align-items:center;justify-content:center;color:#aaa;font-size:10px;';
+                            noImg.textContent = 'No Image';
+                            li.appendChild(noImg);
+                        }
+
+                        li.addEventListener('click', () => {
+                            document.querySelectorAll('.anime-item').forEach(el => el.classList.remove('active'));
+                            li.classList.add('active');
+                            showAnimeSpots(work.title);
+                        });
+                        animeWorkList.appendChild(li);
+                    });
+                });
+        }
+
+        function showAnimeSpots(workTitle) {
+            animeSelectedTitle.textContent = workTitle;
+            animeSelectedTitle.title = workTitle;
+
+            let url = `/api/spots?work=${encodeURIComponent(workTitle)}`;
+            
+            const startPt = selectedPoints.find(p => p.isStart);
+            if (startPt) {
+                url += `&lat=${startPt.lat}&lng=${startPt.lng}`;
+            }
+
+            fetch(url)
+                .then(res => res.json())
+                .then(spots => {
+                    animeSpotList.replaceChildren();
+                    clearAnimeSpotMarkers();
+
+                    if (spots.length === 0) {
+                        const emptyLi = document.createElement('li');
+                        emptyLi.style.cssText = 'font-size: 11px; color: #888; text-align: center; padding: 5px;';
+                        emptyLi.textContent = '該当する聖地がありません';
+                        animeSpotList.appendChild(emptyLi);
+                    } else {
+                        const bounds = L.latLngBounds();
+
+                        spots.forEach(spot => {
+                            const li = document.createElement('li');
+                            li.className = 'anime-item';
+                            li.style.flexDirection = 'row';
+
+                            const infoDiv = document.createElement('div');
+                            infoDiv.className = 'item-info';
+
+                            const nameSpan = document.createElement('span');
+                            nameSpan.className = 'item-main';
+                            nameSpan.title = spot.name;
+                            nameSpan.textContent = spot.name;
+
+                            if (spot.distance !== undefined) {
+                                const distSpan = document.createElement('span');
+                                distSpan.style.cssText = 'font-size: 10px; color: #007bff; float: right;';
+                                distSpan.textContent = `${spot.distance}m`;
+                                nameSpan.appendChild(distSpan);
+                            }
+
+                            infoDiv.appendChild(nameSpan);
+                            li.appendChild(infoDiv);
+
+                            li.addEventListener('click', () => {
+                                if (activeSpotInputHandler) {
+                                    activeSpotInputHandler(spot);
+                                }
+                                map.setView([spot.lat, spot.lng], 16);
+                            });
+
+                            animeSpotList.appendChild(li);
+
+                            if (spot.lat && spot.lng) {
+                                const popupContent = document.createElement('div');
+                                const b = document.createElement('b');
+                                b.textContent = workTitle;
+                                popupContent.appendChild(b);
+                                popupContent.appendChild(document.createElement('br'));
+                                popupContent.appendChild(document.createTextNode(spot.name));
+
+                                const m = L.marker([spot.lat, spot.lng]).addTo(map).bindPopup(popupContent);
+                                animeSpotMarkers.push(m);
+                                bounds.extend([spot.lat, spot.lng]);
+                            }
+                        });
+
+                        if (animeSpotMarkers.length > 0) {
+                            map.fitBounds(bounds, { padding: [50, 50] });
+                        }
+                    }
+
+                    animeSubPanel.style.display = 'flex';
+                    outerAnimeContainer.classList.add('sub-open');
+                    updateTabPositions();
+                });
+        }
+
+        function renderFavList() {
+            favList.replaceChildren();
+            if (favorites.length === 0) {
+                const emptyLi = document.createElement('li');
+                emptyLi.style.cssText = 'font-size: 11px; color: #888; text-align: center; padding: 5px;';
+                emptyLi.textContent = 'お気に入りは登録されていません';
+                favList.appendChild(emptyLi);
+                return;
+            }
+
+            favorites.forEach(spot => {
+                const li = document.createElement('li');
+                li.className = 'fav-item';
+
+                const infoContainer = document.createElement('div');
+                infoContainer.className = 'item-info';
+                infoContainer.title = spot.work_title ? `${spot.work_title} / ${spot.name}` : spot.name;
+
+                const workSpan = document.createElement('span');
+                workSpan.className = 'item-sub';
+                workSpan.textContent = spot.work_title || '作品名なし';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'item-main';
+                nameSpan.textContent = spot.name;
+
+                infoContainer.appendChild(workSpan);
+                infoContainer.appendChild(nameSpan);
+
+                infoContainer.addEventListener('click', () => {
+                    if (activeSpotInputHandler) {
+                        activeSpotInputHandler(spot);
+                    }
+                });
+
+                const starBtn = document.createElement('button');
+                starBtn.type = 'button';
+                starBtn.className = 'star-btn active';
+                starBtn.style.cssText = 'display: block; position: static; transform: none;';
+                starBtn.textContent = '★';
+                starBtn.title = 'お気に入りから削除';
+                starBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleFavorite(spot);
+                });
+
+                li.appendChild(infoContainer);
+                li.appendChild(starBtn);
+                favList.appendChild(li);
+            });
+        }
+
+        function updateAllStarBtns() {
+            document.querySelectorAll('.input-group').forEach(group => {
+                const starBtn = group.querySelector('.star-btn');
+                const spotData = group.spotData;
+                if (starBtn && spotData) {
+                    if (isFavorite(spotData.name)) {
+                        starBtn.classList.add('active');
+                        starBtn.textContent = '★';
+                    } else {
+                        starBtn.classList.remove('active');
+                        starBtn.textContent = '☆';
+                    }
+                }
+            });
+        }
+
+        renderFavList();
+
+        startInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const address = this.value.trim();
+                if (!address) return;
+
+                fetch('/api/geocode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address: address })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status !== 'success') throw new Error(data.message);
+
+                    const startPt = { name: `現在地 (${address})`, lat: data.lat, lng: data.lng, isStart: true };
+                    
+                    if (selectedPoints.length > 0 && selectedPoints[0].isStart) {
+                        selectedPoints[0] = startPt;
+                    } else {
+                        selectedPoints.unshift(startPt);
+                    }
+
+                    startInput.readOnly = true;
+                    startDeleteBtn.style.display = 'flex';
+                    document.getElementById('start-status').textContent = '✓ 設定完了';
+
+                    map.setView([data.lat, data.lng], 14);
+                    updateMarkers();
+
+                    fetchNearbyRecommendations(data.lat, data.lng);
+
+                    if (spotCount === 0) {
+                        addSpotInputField();
+                    }
+                })
+                .catch(err => alert(`住所取得エラー: ${err.message}`));
+            }
+        });
+
+        startDeleteBtn.addEventListener('click', function() {
+            startInput.value = '';
+            startInput.readOnly = false;
+            startDeleteBtn.style.display = 'none';
+            document.getElementById('start-status').textContent = '';
+
+            recommendSection.style.display = 'none';
+            recommendList.replaceChildren();
+
+            selectedPoints = selectedPoints.filter(pt => !pt.isStart);
+            updateMarkers();
+            clearRouteLines();
+            checkSendBtnVisibility();
+        });
+
+        function fetchNearbyRecommendations(lat, lng) {
+            fetch(`/api/nearby_spots?lat=${lat}&lng=${lng}&limit=3`)
+                .then(res => res.json())
+                .then(spots => {
+                    recommendList.replaceChildren();
+                    if (!spots || spots.length === 0) {
+                        recommendSection.style.display = 'none';
+                        return;
+                    }
+
+                    spots.forEach(spot => {
+                        const card = document.createElement('div');
+                        card.className = 'recommend-card';
+
+                        const img = document.createElement('img');
+                        img.src = spot.image_url || 'https://via.placeholder.com/80?text=No+Image';
+                        img.alt = spot.name;
+                        img.className = 'recommend-img';
+
+                        const infoDiv = document.createElement('div');
+                        infoDiv.className = 'recommend-info';
+
+                        const titleName = getSpotWorkTitle(spot);
+                        if (titleName) {
+                            const titleSpan = document.createElement('span');
+                            titleSpan.className = 'recommend-title';
+                            titleSpan.title = titleName;
+                            titleSpan.textContent = titleName;
+                            infoDiv.appendChild(titleSpan);
+                        }
+
+                        const nameSpan = document.createElement('span');
+                        nameSpan.className = 'recommend-name';
+                        nameSpan.title = spot.name;
+                        nameSpan.textContent = spot.name;
+                        infoDiv.appendChild(nameSpan);
+
+                        if (spot.distance) {
+                            const distSpan = document.createElement('span');
+                            distSpan.className = 'recommend-dist';
+                            distSpan.textContent = `${spot.distance}m`;
+                            infoDiv.appendChild(distSpan);
+                        }
+
+                        card.appendChild(img);
+                        card.appendChild(infoDiv);
+
+                        card.addEventListener('click', function() {
+                            if (activeSpotInputHandler) {
+                                activeSpotInputHandler(spot);
+                            }
+                        });
+
+                        recommendList.appendChild(card);
+                    });
+
+                    recommendSection.style.display = 'block';
+                })
+                .catch(err => console.error('おすすめ取得失敗:', err));
+        }
+
+        function addSpotInputField() {
+            spotCount++;
+            const container = document.getElementById('spot-inputs-container');
+
+            const group = document.createElement('div');
+            group.className = 'input-group';
+            group.id = `spot-group-${spotCount}`;
+
+            const label = document.createElement('label');
+            label.textContent = `聖地`;
+
+            const workTitleDisplay = document.createElement('div');
+            workTitleDisplay.className = 'spot-work-title';
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'input-wrapper';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'search-input';
+            input.id = `spot-input-${spotCount}`;
+            input.placeholder = 'クリックで一覧表示 / 入力で絞り込み';
+
+            const starBtn = document.createElement('button');
+            starBtn.type = 'button';
+            starBtn.className = 'star-btn';
+            starBtn.textContent = '☆';
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'delete-btn';
+            deleteBtn.textContent = '×';
+
+            const suggestionsList = document.createElement('ul');
+            suggestionsList.className = 'suggestions-list';
+            suggestionsList.style.display = 'none';
+
+            wrapper.appendChild(input);
+            wrapper.appendChild(starBtn);
+            wrapper.appendChild(deleteBtn);
+
+            group.appendChild(label);
+            group.appendChild(workTitleDisplay);
+            group.appendChild(wrapper);
+            group.appendChild(suggestionsList);
+            container.appendChild(group);
+
+            let currentCandidate = null;
+            let currentSpotData = null;
+
+            activeSpotInputHandler = (spot) => {
+                if (!input.readOnly) {
+                    currentSpotData = selectSpot(spot, input, deleteBtn, starBtn, group, suggestionsList, workTitleDisplay);
+                }
+            };
+
+            starBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (group.spotData) {
+                    toggleFavorite(group.spotData);
+                }
+            });
+
+            deleteBtn.addEventListener('click', function() {
+                if (currentSpotData) {
+                    selectedPoints = selectedPoints.filter(pt => pt !== currentSpotData);
+                    updateMarkers();
+                    clearRouteLines();
+                    checkSendBtnVisibility();
+                }
+                group.remove();
+            });
+
+            function fetchAndShowSuggestions(query = '') {
+                fetch(`/api/spots?q=${encodeURIComponent(query)}`)
+                    .then(res => res.json())
+                    .then(spots => {
+                        suggestionsList.replaceChildren();
+                        if (spots.length === 0) {
+                            suggestionsList.style.display = 'none';
+                            currentCandidate = null;
+                            return;
+                        }
+
+                        currentCandidate = spots[0];
+                        suggestionsList.style.display = 'block';
+
+                        spots.forEach(spot => {
+                            const li = document.createElement('li');
+                            const wTitle = getSpotWorkTitle(spot);
+                            
+                            if (wTitle) {
+                                const workSpan = document.createElement('span');
+                                workSpan.className = 'sugg-work';
+                                workSpan.title = wTitle;
+                                workSpan.textContent = wTitle;
+                                li.appendChild(workSpan);
+                            }
+
+                            const nameSpan = document.createElement('span');
+                            nameSpan.className = 'sugg-name';
+                            nameSpan.textContent = spot.name;
+                            li.appendChild(nameSpan);
+                            
+                            li.addEventListener('mousedown', function(e) {
+                                e.preventDefault();
+                                currentSpotData = selectSpot(spot, input, deleteBtn, starBtn, group, suggestionsList, workTitleDisplay);
+                            });
+
+                            suggestionsList.appendChild(li);
+                        });
+                    });
+            }
+
+            input.addEventListener('focus', function() {
+                if (!this.readOnly) {
+                    activeSpotInputHandler = (spot) => {
+                        if (!input.readOnly) {
+                            currentSpotData = selectSpot(spot, input, deleteBtn, starBtn, group, suggestionsList, workTitleDisplay);
+                        }
+                    };
+                    fetchAndShowSuggestions('');
+                }
+            });
+
+            input.addEventListener('blur', function() {
+                suggestionsList.style.display = 'none';
+            });
+
+            input.addEventListener('input', function() {
+                fetchAndShowSuggestions(this.value.trim());
+            });
+
+            input.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (currentCandidate) {
+                        currentSpotData = selectSpot(currentCandidate, input, deleteBtn, starBtn, group, suggestionsList, workTitleDisplay);
+                    }
+                }
+            });
+
+            input.focus();
+            fetchAndShowSuggestions('');
+            group.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function selectSpot(spot, inputElement, deleteBtnElement, starBtnElement, groupElement, suggestionsElement, workTitleElement) {
+            const workTitle = getSpotWorkTitle(spot);
+            const spotData = { name: spot.name, work_title: workTitle, lat: spot.lat, lng: spot.lng, isStart: false };
+            selectedPoints.push(spotData);
+            groupElement.spotData = spotData;
+            
+            if (workTitle) {
+                workTitleElement.textContent = `🎬 ${workTitle}`;
+                workTitleElement.title = workTitle;
+                workTitleElement.style.display = 'block';
+            } else {
+                workTitleElement.style.display = 'none';
+            }
+
+            inputElement.value = spot.name;
+            inputElement.readOnly = true;
+            deleteBtnElement.style.display = 'flex';
+            starBtnElement.style.display = 'flex';
+            suggestionsElement.style.display = 'none';
+
+            if (isFavorite(spot.name)) {
+                starBtnElement.classList.add('active');
+                starBtnElement.textContent = '★';
+            } else {
+                starBtnElement.classList.remove('active');
+                starBtnElement.textContent = '☆';
+            }
+
+            updateMarkers();
+            checkSendBtnVisibility();
+
+            addSpotInputField();
+
+            return spotData;
+        }
+
+        function checkSendBtnVisibility() {
+            const sendBtn = document.getElementById('send-btn');
+            if (selectedPoints.length >= 2) {
+                sendBtn.style.display = 'block';
+            } else {
+                sendBtn.style.display = 'none';
+            }
+        }
+
+        function updateMarkers() {
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+
+            selectedPoints.forEach((pt, idx) => {
+                const labelName = pt.isStart ? '現在地' : `地点 ${idx}`;
+                const markerOptions = pt.isStart ? { icon: redIcon } : {};
+
+                const popupContent = document.createElement('div');
+                popupContent.textContent = `${labelName}: ${pt.name}`;
+
+                const marker = L.marker([pt.lat, pt.lng], markerOptions).addTo(map)
+                    .bindPopup(popupContent);
+                
+                markers.push(marker);
+            });
+        }
+
+        function clearRouteLines() {
+            routeLayers.forEach(l => map.removeLayer(l));
+            routeLayers = [];
+            document.getElementById('result-box').style.display = 'none';
+        }
+
+        document.getElementById('send-btn').addEventListener('click', function() {
+            if (selectedPoints.length < 2) return alert('現在地と聖地を合わせて2箇所有上指定してください');
+
+            fetch('/api/optimize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ points: selectedPoints })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) throw new Error(data.error);
+
+                const optPoints = data.optimized_points;
+                const coordsString = optPoints.map(pt => `${pt.lng},${pt.lat}`).join(';');
+                return fetch(`https://router.project-osrm.org/route/v1/foot/${coordsString}?overview=full&geometries=geojson&steps=true`)
+                    .then(res => res.json())
+                    .then(osrmData => ({ optPoints, osrmData }));
+            })
+            .then(({ optPoints, osrmData }) => {
+                if (!osrmData.routes || !osrmData.routes.length) return alert('ルートが見つかりませんでした');
+
+                clearRouteLines();
+                const resultList = document.getElementById('result-list');
+                const resultBox = document.getElementById('result-box');
+                resultList.replaceChildren();
+                resultBox.style.display = 'block';
+
+                const bounds = L.latLngBounds();
+                const legs = osrmData.routes[0].legs;
+
+                legs.forEach((leg, idx) => {
+                    const color = ROUTE_COLORS[idx % ROUTE_COLORS.length];
+                    let coords = [];
+                    leg.steps.forEach(step => {
+                        step.geometry.coordinates.forEach(c => coords.push([c[1], c[0]]));
+                    });
+
+                    const polyline = L.polyline(coords, { color: color, weight: 6, opacity: 0.85 }).addTo(map);
+                    routeLayers.push(polyline);
+                    polyline.getLatLngs().forEach(l => bounds.extend(l));
+
+                    const legLi = document.createElement('li');
+                    legLi.className = 'leg-item';
+
+                    const badge = document.createElement('span');
+                    badge.className = 'color-badge';
+                    badge.style.backgroundColor = color;
+
+                    const strong = document.createElement('strong');
+                    strong.textContent = `${idx + 1}: `;
+
+                    const textNode = document.createTextNode(`${optPoints[idx].name} → ${optPoints[idx+1].name}`);
+
+                    legLi.appendChild(badge);
+                    legLi.appendChild(strong);
+                    legLi.appendChild(textNode);
+                    resultList.appendChild(legLi);
+                });
+
+                map.fitBounds(bounds, { padding: [50, 50] });
+            })
+            .catch(err => alert(`ルート計算エラー: ${err.message}`));
+        });
+    </script>
+</body>
+</html>

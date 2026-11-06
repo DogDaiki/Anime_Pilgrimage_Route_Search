@@ -1,0 +1,14 @@
+# 機密情報・環境変数
+map.txt
+.env
+
+# Python環境・キャッシュ
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# システム・エディタ設定
+.DS_Store
+.vscode/
+.idea/
